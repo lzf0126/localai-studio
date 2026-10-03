@@ -49,6 +49,24 @@ jobs:
           Copy-Item 使用说明.txt dist\使用说明.txt -Force
           Get-ChildItem dist | Format-Table Name, Length
 
+      - name: 检查并修正脚本编码
+        run: |
+          # ⚠️ NSIS 必须靠 UTF-8 BOM 才能认出中文脚本。
+          #    没有 BOM 会以系统 ANSI 代码页解析，直接报：
+          #      Bad text encoding: installer.nsi:2
+          #    编辑器（含各种自动改写工具）很容易把 BOM 吃掉，所以这里兜一道。
+          foreach ($f in @('installer.nsi','使用说明.txt')) {
+            if (-not (Test-Path $f)) { continue }
+            $b = [System.IO.File]::ReadAllBytes($f)
+            if ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF) {
+              Write-Host "$f 已有 UTF-8 BOM ✔"
+            } else {
+              $text = [System.Text.Encoding]::UTF8.GetString($b)
+              [System.IO.File]::WriteAllText($f, $text, (New-Object System.Text.UTF8Encoding($true)))
+              Write-Host "$f 缺少 BOM，已补上 ✔"
+            }
+          }
+
       - name: 检查 NSIS
         run: |
           $mk = (Get-Command makensis -ErrorAction SilentlyContinue).Source
@@ -96,7 +114,7 @@ jobs:
 
             | 文件 | 说明 |
             |---|---|
-            | **本地AI助手_安装程序.exe** | 安装包，双击安装，可卸载 |
+            | **本地AI助手_安装程序.exe** | 安装包，双击安装，带卸载程序 |
             | 本地AI助手.exe | 免安装单文件版，双击即用 |
             | SHA256SUMS.txt | 校验和，可自行验证文件完整性 |
 
@@ -117,10 +135,10 @@ jobs:
             # 与 SHA256SUMS.txt 里的值比对
             ```
 
-            ## 国内下载慢/断连的话
+            ## 国内下载慢或断连
 
-            GitHub 直连在国内时断时续。如果卡住，在下载链接前面加上
-            `https://gh-proxy.com/` 即可，例如：
+            GitHub 直连在国内时断时续。如果卡住，在下载链接前加上
+            `https://gh-proxy.com/` 即可：
 
             ```
             https://gh-proxy.com/https://github.com/lzf0126/localai-studio/releases/download/v3.0.0/本地AI助手_安装程序.exe
@@ -133,4 +151,4 @@ jobs:
             3. 左侧「模型市场」→ 选一个模型 →「下载并部署」
             4. 回「对话」页开始用
 
-            推荐在 16 GB 内存 / 纯 CPU 的机器上用 `deepseek-r1:7b`（4.4 GB）。
+            16 GB 内存 / 纯 CPU 的机器推荐 `deepseek-r1:7b`（4.4 GB）。
