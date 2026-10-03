@@ -106,10 +106,21 @@ jobs:
           if (-not (Test-Path "dist\本地AI助手_安装程序.exe")) { throw "没有生成安装包" }
           Write-Host "安装包制作成功"
 
+      - name: 准备发布文件
+        run: |
+          # ⚠️ Release 资源名要用 ASCII。
+          #    实测 softprops/action-gh-release 在 Windows runner 上会把非 ASCII
+          #    文件名截掉：「本地AI助手_安装程序.exe」变成了「AI._.exe」，
+          #    「本地AI助手.exe」变成了「AI.exe」—— 下载的人根本认不出哪个是安装包。
+          #    中文说明放在 Release 正文里，文件名用英文更可靠。
+          Copy-Item "dist\本地AI助手_安装程序.exe" "dist\LocalAI-Studio-Setup.exe"    -Force
+          Copy-Item "dist\本地AI助手.exe"          "dist\LocalAI-Studio-Portable.exe" -Force
+          Get-ChildItem dist -File | Format-Table Name, Length
+
       - name: 计算校验和
         run: |
           Remove-Item dist\SHA256SUMS.txt -ErrorAction SilentlyContinue
-          Get-ChildItem dist -File | Where-Object { $_.Extension -eq '.exe' } | ForEach-Object {
+          Get-ChildItem dist -File | Where-Object { $_.Name -like 'LocalAI-Studio*' } | ForEach-Object {
             $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
             "$h  $($_.Name)" | Out-File -Append -Encoding utf8 dist\SHA256SUMS.txt
           }
@@ -120,26 +131,38 @@ jobs:
         with:
           name: LocalAI-Studio-windows
           path: |
-            dist/*.exe
+            dist/LocalAI-Studio*.exe
             dist/SHA256SUMS.txt
+
+      - name: 删除同标签的旧 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 重新发布时先清掉旧的，否则会残留上一次的畸形成员
+          gh release delete "${{ github.ref_name }}" --yes
 
       - name: 发布 Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/本地AI助手_安装程序.exe
-            dist/本地AI助手.exe
+            dist/LocalAI-Studio-Setup.exe
+            dist/LocalAI-Studio-Portable.exe
             dist/SHA256SUMS.txt
           generate_release_notes: true
           body: |
-            ## 下载
+            ## 下载哪个
 
             | 文件 | 说明 |
             |---|---|
-            | **本地AI助手_安装程序.exe** | 安装包，双击安装，带卸载程序 |
-            | 本地AI助手.exe | 免安装单文件版，双击即用 |
-            | SHA256SUMS.txt | 校验和，可自行验证文件完整性 |
+            | **LocalAI-Studio-Setup.exe** | **安装包**（推荐）。双击安装，带开始菜单和卸载程序 |
+            | LocalAI-Studio-Portable.exe | 免安装单文件版，双击即用，不写注册表 |
+            | SHA256SUMS.txt | 校验和，可验证文件完整性 |
+
+            > 程序界面、说明文档都是中文，只是文件名用了英文
+            > —— GitHub 对中文文件名的资源会截断成乱码（实测变成了 `AI._.exe`）。
 
             ## 使用前须装后端
 
@@ -154,7 +177,7 @@ jobs:
             验证文件完整性：
 
             ```powershell
-            Get-FileHash .\本地AI助手_安装程序.exe -Algorithm SHA256
+            Get-FileHash .\LocalAI-Studio-Setup.exe -Algorithm SHA256
             # 与 SHA256SUMS.txt 里的值比对
             ```
 
@@ -164,8 +187,11 @@ jobs:
             `https://gh-proxy.com/` 即可：
 
             ```
-            https://gh-proxy.com/https://github.com/lzf0126/localai-studio/releases/download/v3.0.0/本地AI助手_安装程序.exe
+            https://gh-proxy.com/https://github.com/lzf0126/localai-studio/releases/latest/download/LocalAI-Studio-Setup.exe
             ```
+
+            （`releases/latest/download/<文件名>` 是 GitHub 的固定直链，
+            版本更新后不用改链接。）
 
             ## 首次使用
 
