@@ -1,0 +1,30 @@
+# 不让 git 做换行符转换 —— 证书文件被改换行有风险
+*.pem   -text
+*.crt   -text
+*.cer   -text
+
+# 二进制
+*.exe   binary
+*.dll   binary
+*.zip   binary
+*.ico   binary
+*.png   binary
+
+# 脚本用 CRLF（Windows 环境）
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+*.nsi   text eol=crlf
+
+# 源码与文档用 LF
+*.py    text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.txt   text eol=lf
+
+# GitHub 语言统计：不要把手写的前端算成“生成文件”
+web/*.js   linguist-language=JavaScript
+web/*.css  linguist-language=CSS
