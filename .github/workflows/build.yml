@@ -31,24 +31,37 @@ jobs:
             --distpath dist --workpath _build --specpath _build `
             localai_web.py
 
-      - name: 生成中文名副本
-        run: Copy-Item dist\LocalAIWeb.exe "dist\本地AI助手.exe" -Force
+      - name: 准备安装包素材
+        run: |
+          # installer.nsi 里除了 exe 还要打包「使用说明.txt」，
+          # 而 PyInstaller 只会把 exe 放进 dist\，所以这里必须补上，
+          # 否则 makensis 会因为找不到文件而失败。
+          Copy-Item dist\LocalAIWeb.exe "dist\本地AI助手.exe" -Force
+          Copy-Item 使用说明.txt dist\使用说明.txt -Force
+          Get-ChildItem dist | Format-Table Name, Length
 
       - name: 检查 NSIS
         run: |
           $mk = (Get-Command makensis -ErrorAction SilentlyContinue).Source
-          if (-not $mk) { choco install nsis -y --no-progress }
+          if (-not $mk) {
+            Write-Host "未找到 makensis，尝试安装…"
+            choco install nsis -y --no-progress
+            $env:Path += ";C:\Program Files (x86)\NSIS;C:\Program Files\NSIS"
+          }
           makensis /VERSION
 
       - name: 制作安装包
         run: |
           makensis /DSRC_DIR=dist /DDEPLOY_ROOT=. installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "NSIS 编译失败" }
+          if (-not (Test-Path "dist\本地AI助手_安装程序.exe")) { throw "没有生成安装包" }
 
       - name: 计算校验和
         run: |
-          Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe' } | ForEach-Object {
+          Remove-Item dist\SHA256SUMS.txt -ErrorAction SilentlyContinue
+          Get-ChildItem dist -File | Where-Object { $_.Extension -eq '.exe' } | ForEach-Object {
             $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$h  $($_.Name)" | Tee-Object -Append dist\SHA256SUMS.txt
+            "$h  $($_.Name)" | Out-File -Append -Encoding utf8 dist\SHA256SUMS.txt
           }
           Get-Content dist\SHA256SUMS.txt
 
@@ -70,12 +83,33 @@ jobs:
             dist/SHA256SUMS.txt
           generate_release_notes: true
           body: |
-            下载 `本地AI助手_安装程序.exe` 安装即可。
+            ## 下载
 
-            **注意**：安装包未做代码签名，Windows 可能提示「已保护你的电脑」，
-            点「更多信息 → 仍要运行」。
+            **普通用户**：下载 `本地AI助手_安装程序.exe`，双击安装。
 
-            可用 `SHA256SUMS.txt` 自行校验：
+            **不想安装**：下载 `本地AI助手.exe`，免安装单文件版，双击即用。
+
+            ## 使用前须装后端
+
+            本程序是客户端，模型计算依赖 [Ollama](https://ollama.com/download)，
+            需要单独安装一次（约 1.8 GB）。装完后打开本程序即可。
+
+            ## 关于安全警告
+
+            安装包**未做代码签名**，Windows 可能提示「已保护你的电脑」，
+            点「更多信息 → 仍要运行」即可。
+
+            可以用 `SHA256SUMS.txt` 自行校验：
+
             ```powershell
             Get-FileHash .\本地AI助手_安装程序.exe -Algorithm SHA256
+            ```
+
+            ## 国内下载慢的话
+
+            GitHub 直连在国内时断时续。如果卡住，把下载链接前面加上
+            `https://gh-proxy.com/` 即可，例如：
+
+            ```
+            https://gh-proxy.com/https://github.com/lzf0126/localai-studio/releases/download/v3.0.0/本地AI助手_安装程序.exe
             ```
