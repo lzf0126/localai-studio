@@ -27,8 +27,7 @@ jobs:
       - name: 打包单文件 exe
         run: |
           # ⚠️ 这里的 --add-data 必须用绝对路径。
-          #    PyInstaller 解析相对路径时是相对于 --specpath 的，
-          #    用相对路径会报：
+          #    PyInstaller 解析相对路径时是相对于 --specpath 的，用相对路径会报：
           #      ERROR: Unable to find '...\_build\web' when adding binary and data files
           #    本地构建脚本 (build_exe.ps1) 用的就是绝对路径，所以没踩到这个坑。
           python -m PyInstaller --noconfirm --clean --onefile --windowed `
@@ -49,12 +48,38 @@ jobs:
           Copy-Item 使用说明.txt dist\使用说明.txt -Force
           Get-ChildItem dist | Format-Table Name, Length
 
-      - name: 检查并修正脚本编码
+      - name: 安装 NSIS
         run: |
-          # ⚠️ NSIS 必须靠 UTF-8 BOM 才能认出中文脚本。
-          #    没有 BOM 会以系统 ANSI 代码页解析，直接报：
-          #      Bad text encoding: installer.nsi:2
-          #    编辑器（含各种自动改写工具）很容易把 BOM 吃掉，所以这里兜一道。
+          # ⚠️ GitHub Actions 的每个 run: 步骤都是独立的 shell 进程，
+          #    在一步里改 $env:Path 不会传给下一步。
+          #    必须写进 $GITHUB_PATH，否则下一步找不到 makensis。
+          $mk = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if ($mk) {
+            Write-Host "NSIS 已预装: $mk"
+            & $mk /VERSION
+          } else {
+            Write-Host "未预装，用 choco 安装…"
+            choco install nsis -y --no-progress
+            "C:\Program Files (x86)\NSIS" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+            "C:\Program Files\NSIS"       | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+            Write-Host "已写入 GITHUB_PATH，后续步骤可用"
+          }
+
+      - name: 制作安装包
+        run: |
+          # 双保险：PATH 里找不到就直接用绝对路径
+          $mk = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $mk) {
+            foreach ($p in @('C:\Program Files (x86)\NSIS\makensis.exe','C:\Program Files\NSIS\makensis.exe')) {
+              if (Test-Path $p) { $mk = $p; break }
+            }
+          }
+          if (-not $mk) { throw "找不到 makensis，无法制作安装包" }
+          Write-Host "使用: $mk"
+          & $mk /VERSION
+
+          # NSIS 靠 UTF-8 BOM 才能识别中文脚本，没有 BOM 会按系统 ANSI 代码页
+          # 解析并报 Bad text encoding。这里兜一道，避免被编辑器吃掉。
           foreach ($f in @('installer.nsi','使用说明.txt')) {
             if (-not (Test-Path $f)) { continue }
             $b = [System.IO.File]::ReadAllBytes($f)
@@ -67,21 +92,19 @@ jobs:
             }
           }
 
-      - name: 检查 NSIS
-        run: |
-          $mk = (Get-Command makensis -ErrorAction SilentlyContinue).Source
-          if (-not $mk) {
-            Write-Host "未找到 makensis，尝试安装…"
-            choco install nsis -y --no-progress
-            $env:Path += ";C:\Program Files (x86)\NSIS;C:\Program Files\NSIS"
+          # 捕获输出：失败时把它转成 GitHub 注解，
+          # 这样可以直接通过 check-runs API 读到错误，不用翻日志页面。
+          $out = & $mk /DSRC_DIR=dist /DDEPLOY_ROOT=. installer.nsi 2>&1 | Out-String
+          $rc = $LASTEXITCODE
+          Write-Host $out
+          if ($rc -ne 0) {
+            $out -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 12 | ForEach-Object {
+              Write-Host "::error::NSIS: $($_.Trim())"
+            }
+            throw "NSIS 编译失败（退出码 $rc）"
           }
-          makensis /VERSION
-
-      - name: 制作安装包
-        run: |
-          makensis /DSRC_DIR=dist /DDEPLOY_ROOT=. installer.nsi
-          if ($LASTEXITCODE -ne 0) { throw "NSIS 编译失败" }
           if (-not (Test-Path "dist\本地AI助手_安装程序.exe")) { throw "没有生成安装包" }
+          Write-Host "安装包制作成功"
 
       - name: 计算校验和
         run: |
